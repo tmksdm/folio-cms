@@ -5,5 +5,9 @@
   "compatibility_date": "2026-10-11",
   "workers_dev": true,
   "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "AUTH_STORE", "class_name": "AuthStore" }]
+  },
+  "migrations": [{ "tag": "v1-auth", "new_sqlite_classes": ["AuthStore"] }],
   "observability": { "enabled": false }
 }

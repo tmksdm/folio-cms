@@ -1,12 +1,14 @@
-# Первый запуск Cloudflare
+# Развёртывание Stage 01 без Zero Trust
 
-Реальное развёртывание выполняет владелец аккаунта. На Stage 01 оно не выполнено; localhost и dry-run не доказывают работу Access. Секреты и код из письма не отправлять в чат или GitHub.
+Развёртывание выполняет владелец аккаунта. Код локально проверен; настоящий Worker, доставка Resend и Turnstile на аккаунте требуют ручной приёмки. Не отправляйте ключи, cookie и коды в чат или GitHub. Собственный домен не нужен: используется `workers.dev`.
 
-## 1. Подготовка
+## 1. Cloudflare Workers Free
 
-Нужны Node.js 22+, собственный Cloudflare-аккаунт, Workers Free и Zero Trust Free. Не выбирать платный план. По [текущей инструкции Cloudflare](https://developers.cloudflare.com/cloudflare-one/setup/) при подключении Zero Trust Free могут потребоваться платёжные данные, хотя бесплатный план не начисляет плату. Если это неприемлемо — остановиться; платный тариф не включать.
+В обычном Cloudflare Dashboard откройте Workers & Pages, активируйте Workers Free и выберите поддомен `workers.dev`. Не подключайте Zero Trust/Access и платный Workers план. SQLite Durable Objects поддерживаются на Free; binding и миграция уже в `wrangler.jsonc`, вручную создавать namespace не требуется. [Документация Free](https://developers.cloudflare.com/durable-objects/platform/pricing/).
 
-В PowerShell:
+Если аккаунт всё же требует карту или оплату для Workers/Turnstile, остановитесь и сообщите, на каком экране. Доступность функций на Free подтверждена документацией, отсутствие такого требования именно на вашем аккаунте пока не проверено.
+
+В PowerShell, Node.js 22.13+ (предпочтительно 24):
 
 ```powershell
 Set-Location D:\Pr\folio
@@ -18,45 +20,81 @@ npx.cmd wrangler login
 npm.cmd run deploy
 ```
 
-`wrangler login` открывает авторизацию Cloudflare в вашем браузере. Токены в репозиторий не копировать. Первый deploy создаёт `folio-admin` на `https://folio-admin.<ваш-поддомен>.workers.dev`. Пока параметры Access не заданы, **все страницы и API возвращают 503 без интерфейса**. Это закрытый старт, а не публичная админка. Preview URL отключены в `wrangler.jsonc`.
+Первый deploy создаст `folio-admin` и SQLite Durable Object. Без всех настроек все маршруты возвращают 503, панель не открыта. Запишите точный production URL вида `https://folio-admin.<ваш-поддомен>.workers.dev`, без завершающего слеша. Preview URL выключены. Не добавляйте другие hostname: Worker принимает только APP_ORIGIN.
 
-## 2. Email-код и единственный разрешённый адрес
+Если прежний Worker уже был закрыт Cloudflare Access, отключите его Access-защиту после установки новой версии и всех настроек. Новая версия без настроек сама отказывает с 503. Старые ACCESS_TEAM_DOMAIN/ACCESS_AUD больше не читаются и могут быть удалены из настроек.
 
-1. В Cloudflare открыть **Zero Trust**, завершить настройку Free, выбрать имя команды. Записать точный адрес `https://<имя-команды>.cloudflareaccess.com` без завершающего слеша.
-2. В **Zero Trust → Integrations → Identity providers** добавить **One-time PIN**. Для новых организаций он больше не включается автоматически. Названия пунктов могут меняться; [официальная инструкция OTP](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
-3. В **Workers & Pages → folio-admin → Access → Protect this Worker behind Access** выбрать **All traffic**, чтобы защитить production и связанные адреса, не только preview. [Инструкция защиты Worker](https://developers.cloudflare.com/workers/configuration/cloudflare-access/).
-4. Настроить policy: **Action = Allow**, **Include → Emails → ваш единственный полный email**, **Require → Login methods → One-time PIN**. Для приложения оставить только One-time PIN как способ входа; отключить использование всех провайдеров по умолчанию. Session duration — например 1 час.
-5. Удалить автоматически добавленные разрешения другим участникам аккаунта и проверить, что нет иных Allow/Bypass/Service Auth правил. Не выбирать `Everyone`, весь email-домен или `One-time PIN` как самостоятельное Include. [Правила Access](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/common-policies/).
-6. В **Zero Trust → Access controls → Applications → приложение folio-admin → Overview** скопировать **Application Audience (AUD) Tag**. Это 64 шестнадцатеричных символа конкретного приложения. Если Worker-level Access недоступен, создать **Self-hosted** приложение на весь production-hostname без ограничения пути, с той же policy; preview оставить выключенным, дополнительные hostname не добавлять до их защиты.
+## 2. Turnstile Free
 
-## 3. Параметры Worker
+В Cloudflare Dashboard откройте **Turnstile → Add widget**:
 
-После настройки policy открыть **Workers & Pages → folio-admin → Settings → Variables and Secrets**, добавить серверные параметры (можно тип Secret, чтобы не раскрывать email):
+1. Название: `Folio login`.
+2. Hostname: только `folio-admin.<ваш-поддомен>.workers.dev`, без схемы и пути. Не выбирайте разрешение любых hostname и не добавляйте localhost к production-виджету.
+3. Режим: Managed. Pre-clearance не включайте.
+4. Сохраните публичный Site key и приватный Secret key локально. Используйте реальные ключи виджета, не тестовые ключи документации.
 
-| Имя | Значение |
-|---|---|
-| `ACCESS_TEAM_DOMAIN` | `https://<имя-команды>.cloudflareaccess.com`, без `/` на конце |
-| `ACCESS_AUD` | AUD из Access application |
-| `ALLOWED_EMAIL` | Тот же единственный полный email, который разрешён policy |
+Turnstile работает без Zero Trust. [Free план](https://developers.cloudflare.com/turnstile/plans/), [создание виджета](https://developers.cloudflare.com/turnstile/get-started/).
 
-Сохранить и применить изменения. Не записывать значения в `wrangler.jsonc` и не коммитить `.dev.vars`. Эти значения не заменяют policy — нужны обе проверки. [Серверная проверка JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/).
+## 3. Resend и Worker secrets
 
-Для последующих обновлений `npm.cmd run deploy` сохраняет Cloudflare secrets. Если добавляли параметры как обычные Variables, сначала убедиться, что Wrangler не удалит их: предпочтительно хранить все три как **Secret** или задавать через `npx.cmd wrangler secret put ИМЯ` (ввод только в локальный терминал).
+Используйте уже проверенный Resend API-ключ. Отправитель фиксирован: `Folio <onboarding@resend.dev>`. ALLOWED_EMAIL должен быть тем же адресом владельца аккаунта Resend, на который уже успешно пришло тестовое письмо. Другим получателям отправка с `resend.dev` недоступна без своего подтверждённого домена. Для этой личной панели менять домен или план не требуется. [Resend: ошибка validation_error](https://resend.com/docs/api-reference/errors).
 
-## 4. Ручная приёмка именно опубликованного сервиса
+Из корня репозитория последовательно выполните команды. Значения вводите только в локальные приглашения Wrangler:
 
-- В приватном окне открыть Worker: сначала страница Cloudflare Access, без панели Folio. Прямые `/api/session`, `/api/sites`, `/assets/admin.js` тоже требуют входа; UI/identity не доступны анонимно.
-- Ввести разрешённый email, получить код, войти: открывается обзор. Перейти в «Сайты» (пустой список), «Доступ» (ваш email). На телефоне проверить отсутствие горизонтальной прокрутки и удобство навигации.
-- Открыть `/sites` и `/settings` напрямую, обновить страницу: интерфейс и стили загружаются после проверки Access.
-- Нажать «Выйти», затем повторно открыть panel/API: снова требуется вход. После истечения сессии API не выдаёт identity, панель предлагает повторный вход.
-- В другом приватном окне указать другой email: доступа нет. Cloudflare может показать «код отправлен» для скрытия существования адреса; это не означает разрешение доступа.
-- Через терминал запросить URL без cookie, затем с поддельным `Cf-Access-Jwt-Assertion: invalid`: не должно быть 200 с панелью или данными API. Если Access перехватит запрос и вернёт свою login-страницу со статусом 200, отличать её от Folio/JSON; это не доступ к приложению.
-- Проверить все включённые hostname; preview URL сейчас выключены. Не добавлять route/custom domain без защиты. При сбое конфигурации панели возвращается отказ, а не гостевой режим.
+```powershell
+npx.cmd wrangler secret put APP_ORIGIN
+npx.cmd wrangler secret put ALLOWED_EMAIL
+npx.cmd wrangler secret put RESEND_API_KEY
+npx.cmd wrangler secret put TURNSTILE_SITE_KEY
+npx.cmd wrangler secret put TURNSTILE_SECRET_KEY
+```
 
-Записать фактический URL, дату, разрешённый/отклонённый вход и результат выхода. До этих проверок статус остаётся «подготовлено к развёртыванию», а не «опубликовано и защищено».
+APP_ORIGIN — полный HTTPS production URL без `/` на конце, пути и query. ALLOWED_EMAIL — один полный адрес без пробелов. SITE_KEY — публичный ключ созданного виджета, SECRET_KEY — его приватный ключ.
 
-## Локальные проверки
+Сгенерируйте AUTH_SECRET и передайте прямо Wrangler, без вывода значения в терминал:
 
-`npm test` проверяет настоящие RSA-подписи на временных ключах, issuer/audience/expiry/email, отрицательные случаи и защищённость маршрутов. `npm run dev` запускает runtime Worker без обхода доступа. `npm run preview:test` — только стенд интерфейса с тестовой identity `owner@example.test`; не проверяет доставку OTP, policy или logout Cloudflare.
+```powershell
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))" | npx.cmd wrangler secret put AUTH_SECRET
+npm.cmd run deploy
+```
 
-Worker не использует платные bindings. [Ограничения Workers Free](https://developers.cloudflare.com/workers/platform/limits/) включают суточную квоту запросов и CPU; реальные расходы CPU криптопроверки под этой квотой требуют проверки на вашем аккаунте. Если лимит мешает, сначала измерить и обсудить решение, не менять тариф автоматически.
+Все шесть значений хранить как **Secret**, а не обычные Variables: deploy не должен удалять настройки. Альтернатива вводу — Workers & Pages → folio-admin → Settings → Variables and Secrets → Add → Secret. AUTH_SECRET — ровно 64 строчных hex-символа из криптографического генератора. Смена AUTH_SECRET/email/origin отзывает прежние коды и сессии. Не размещайте реальные значения в `.dev.vars.example`, `wrangler.jsonc`, скриншотах или Git. Не включайте логи тел запросов/писем.
+
+## 4. Приёмка опубликованного сервиса
+
+В приватном окне компьютера и на телефоне:
+
+1. Откройте `/settings` напрямую. Должен открыться `/login?next=...`, без админки.
+2. Пройдите Turnstile, введите разрешённый email, нажмите «Получить код». Проверьте загрузку, письмо и папку «Спам». Код действует 10 минут и вводится в том же браузере.
+3. Один раз введите неверный код: доступа нет. Введите верный: открывается исходная `/settings`, виден ваш email. Проверьте обзор, пустые сайты, прямые ссылки и обновление страниц.
+4. Нажмите «Выйти». Снова откройте panel/API: требуется вход. Ранее сохранённая session-cookie после выхода тоже не должна давать доступа. Не пересылайте cookie.
+5. Повторное использование кода запрещено. Пять ошибок подряд аннулируют код. Новый запрос заменяет старый; между запросами нужна минута, максимум 5 в час и 20 в сутки, включая ошибки доставки.
+6. В другом приватном окне запросите код на иной email: сообщение нейтральное, письмо не отправляется, вход невозможен.
+7. До входа прямые `/api/session`, `/api/sites`, `/assets/admin.js`, `/assets/admin.css` возвращают 401. Поддельный Access/email-заголовок не помогает. Страница входа и её два ресурса публичны.
+8. Через час без нового входа `/api/session` должен вернуть 401; интерфейс при повторной проверке предлагает войти снова. Откройте защищённую страницу напрямую — появится вход.
+9. Проверьте ошибки сети и повторную попытку; ошибка выхода не должна показывать успешный выход. На телефоне — отсутствие горизонтальной прокрутки, удобство ввода шести цифр и Turnstile.
+
+Запишите URL, дату, результат доставки, разрешённого/запрещённого входа, повторного кода и выхода. Просмотрите Free usage Workers/DO и остаток Resend quota. Бесплатные лимиты могут временно закрыть сервис; не повышайте тариф автоматически. Код не гарантирует защиту доступности против DDoS.
+
+## Локальный HTTPS-стенд
+
+`npm.cmd run dev` без конфигурации проверяет настоящий закрытый Worker (503). `.dev.vars.example` содержит только имена настроек; реальные значения в `.dev.vars` игнорируются Git.
+
+Для повторения браузерного сценария без отправки реальных писем:
+
+```powershell
+npm.cmd run preview:test
+```
+
+Во втором PowerShell:
+
+```powershell
+'{"browser":{"contextOptions":{"ignoreHTTPSErrors":true}}}' | Set-Content playwright.config.json -Encoding utf8
+npx.cmd playwright-cli open https://127.0.0.1:4173 --browser msedge --config=playwright.config.json
+npx.cmd playwright-cli run-code --filename tests/browser-check.js
+npx.cmd playwright-cli close
+```
+
+Игнорирование сертификата применяется только к localhost-стенду. В нём настоящие Worker/SQLite и тестовые значения, а доставка и Siteverify подменены. В браузерном сценарии виджет тоже подменён. Это не подтверждение настоящей доставки/Turnstile. `tests/` и локальный endpoint получения тестового кода не входят в production bundle. После проверки остановите стенд Ctrl+C.
+
+После развёртывания — внешнее ревью Stage 01. Stage 02 не начинать.

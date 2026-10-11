@@ -1,13 +1,42 @@
 // Run via playwright-cli run-code --filename tests/browser-check.js against the
-// localhost test fixture. This checks UI, not the real Cloudflare Access policy.
+// HTTPS test fixture. Email and CAPTCHA are mocked; Worker and SQLite are real.
 async (page) => {
-  const base = 'http://127.0.0.1:4173';
+  const base = 'https://127.0.0.1:4173';
   const failures = [];
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   page.on('pageerror', (error) => failures.push(error.message));
   const text = async (selector) => (await page.locator(selector).textContent()).trim();
   const confirmed = () => page.locator('#status-text').filter({ hasText: 'Сессия подтверждена' }).waitFor();
   const noOverflow = async () => assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Horizontal page overflow');
+
+  await page.context().clearCookies();
+  // Only the external Turnstile widget is mocked; production has no test switch.
+  await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js', (route) => route.fulfill({ contentType: 'text/javascript', body: `const input = document.createElement('input'); input.type = 'hidden'; input.name = 'cf-turnstile-response'; input.value = 'test-token'; document.getElementById('request-form').append(input); window.turnstile = { reset() {} };` }));
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(base + '/settings');
+    assert(new URL(page.url()).pathname === '/login', 'Protected direct link must require login');
+    await noOverflow();
+    await page.screenshot({ path: 'output/playwright/login-' + width + '.png', fullPage: true });
+  }
+  await page.locator('#email').fill('owner@example.test');
+  await page.route('**/auth/request', (route) => route.abort('internetdisconnected'));
+  await page.getByRole('button', { name: 'Получить код', exact: true }).click();
+  await page.getByText('Не удалось связаться с сервером.', { exact: false }).waitFor();
+  await page.unroute('**/auth/request');
+  await page.getByRole('button', { name: 'Получить код', exact: true }).click();
+  await page.locator('#verify-form').waitFor();
+  const code = (await (await page.request.get(base + '/__test/code')).json()).code;
+  await page.locator('#code').fill(code === '000000' ? '111111' : '000000');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await page.getByText('Код неверен, истёк или уже использован.', { exact: false }).waitFor();
+  await page.locator('#code').fill(code);
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await page.waitForURL(base + '/settings');
+  await confirmed();
+  const session = (await page.context().cookies()).find((c) => c.name === '__Host-folio-session');
+  assert(session?.httpOnly && session?.secure && session?.sameSite === 'Strict', 'Session cookie protection missing');
+  assert(!await page.evaluate(() => document.cookie.includes('folio-session')), 'Session cookie exposed to JavaScript');
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(base);
@@ -80,5 +109,13 @@ async (page) => {
   await page.goto(base);
   await confirmed();
   assert(failures.length === 0, 'Unhandled browser errors: ' + failures.join('; '));
-  console.log('PASS: desktop/mobile 1440/390/320, navigation, direct reload, keyboard, loading, 503 retry, offline retry, expired session; no page errors. Cloudflare OTP/logout not tested.');
+  await page.route('**/auth/logout', (route) => route.abort('internetdisconnected'));
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.getByText('Не удалось выйти.', { exact: false }).waitFor();
+  await page.unroute('**/auth/logout');
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.waitForURL(base + '/login');
+  await page.goto(base + '/sites');
+  assert(new URL(page.url()).pathname === '/login', 'Logout did not revoke access');
+  console.log('PASS: login/errors/cookies/logout, desktop/mobile 1440/390/320, navigation, direct reload, keyboard, loading, 503 retry, offline retry, expired session; no page errors. Real Resend and Turnstile not tested.');
 }

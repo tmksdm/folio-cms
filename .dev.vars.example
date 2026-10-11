@@ -1,5 +1,8 @@
-# Copy to .dev.vars only for real Access configuration. Never commit .dev.vars.
-# Empty/missing configuration denies every request. No development auth bypass.
-ACCESS_TEAM_DOMAIN="https://YOUR-TEAM.cloudflareaccess.com"
-ACCESS_AUD="YOUR-APPLICATION-AUD"
-ALLOWED_EMAIL="YOUR-EXACT-EMAIL"
+# Copy to ignored .dev.vars only for real local configuration. Never commit values.
+# Missing settings fail closed; no development bypass exists in production.
+APP_ORIGIN="https://YOUR-WORKER.workers.dev"
+ALLOWED_EMAIL="YOUR-RESEND-ACCOUNT-EMAIL"
+AUTH_SECRET="GENERATE-64-LOWERCASE-HEX-CHARACTERS-LOCALLY"
+RESEND_API_KEY="re_REPLACE-LOCALLY"
+TURNSTILE_SITE_KEY="YOUR-REAL-WIDGET-SITE-KEY"
+TURNSTILE_SECRET_KEY="YOUR-REAL-WIDGET-SECRET"

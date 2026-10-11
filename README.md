@@ -1,13 +1,13 @@
 # Folio CMS
 
-Собственная CMS для независимых сайтов GitHub Pages. Общая админка — Cloudflare Worker с входом через Cloudflare Access по email-коду.
+Собственная CMS для нескольких независимых сайтов GitHub Pages. Общая админка — Cloudflare Worker с собственным входом по email-коду через Resend и Turnstile, без Zero Trust и собственного домена.
 
-Stage 01: адаптивный интерфейс, проверка доступа, основа развёртывания. Создание сайтов, Markdown-редактор и GitHub-интеграция ещё не реализованы.
+Stage 01: адаптивные страницы, вход, защищённая серверная сессия, основа развёртывания. Создание сайтов, Markdown-редактор и GitHub-интеграция ещё не реализованы. SQLite Durable Object хранит только состояние авторизации и доступен на Workers Free.
 
 - [Продукт](PRODUCT.md), [архитектура](ARCHITECTURE.md), [этапы](ROADMAP.md), [состояние](PROJECT_STATE.md)
 - [Развёртывание и ручная проверка](DEPLOY.md)
 
-Node.js 22+; команды в PowerShell из корня проекта:
+Node.js 22.13+ (предпочтительно 24), PowerShell из корня проекта:
 
 ```powershell
 npm.cmd ci
@@ -16,16 +16,6 @@ npm.cmd test
 npm.cmd run build
 ```
 
-`npm.cmd run dev` запускает настоящий Worker локально. Без настроенного Access/JWT он намеренно возвращает отказ, а не публичную админку.
+Без настроек `npm.cmd run dev` возвращает 503. Секреты задаёт владелец через Wrangler/Cloudflare Dashboard. `npm.cmd run preview:test` запускает только HTTPS localhost-стенд с настоящим Worker/SQLite и подменой email/CAPTCHA; инструкции воспроизведения — в DEPLOY.md.
 
-`npm.cmd run preview:test` запускает **только тестовый стенд интерфейса** на `http://127.0.0.1:4173`: временный тестовый signer, без Cloudflare OTP. Не использовать как развёртывание или доказательство защиты.
-
-Для воспроизводимой браузерной проверки оставить стенд работающим и в другом PowerShell выполнить (нужен установленный Edge):
-
-```powershell
-npx.cmd playwright-cli open http://127.0.0.1:4173 --browser msedge
-npx.cmd playwright-cli run-code --filename tests/browser-check.js
-npx.cmd playwright-cli close
-```
-
-Проверки в GitHub Actions выполняют установку, проверку JavaScript, 15 тестов доступа/маршрутов и dry-run сборку. Автоматического развёртывания Cloudflare нет.
+GitHub Actions выполняет install/check/test/build, без автоматического deploy и production secrets. Успех локальных тестов не доказывает работу опубликованного сервиса; Stage 01 требует развёртывания владельцем и внешнего ревью.

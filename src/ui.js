@@ -23,7 +23,7 @@ export const html = `<!doctype html>
       <div class="sidebar-note"><span class="dot" aria-hidden="true"></span>Личное пространство<br><small>Ваши сайты. Ваши материалы.</small></div>
     </aside>
     <div class="workspace">
-      <header class="topbar"><span>Панель управления</span><a href="/cdn-cgi/access/logout">Выйти</a></header>
+      <header class="topbar"><span>Панель управления</span><button id="logout" type="button">Выйти</button></header>
       <main id="main" tabindex="-1">
         <div class="page-heading"><div><p class="eyebrow">FOLIO / <span id="section-label">ОБЗОР</span></p><h1 id="page-title">Ваше пространство для сайтов</h1><p id="page-description" class="lead">Одна панель для ваших независимых проектов.</p></div><span class="stage-badge">Первый этап</span></div>
         <div id="status" role="status" aria-live="polite" class="status"><span class="dot" aria-hidden="true"></span><span id="status-text">Проверяем сессию…</span></div>
@@ -33,7 +33,7 @@ export const html = `<!doctype html>
           <div class="details-grid"><article class="detail-card"><span class="card-number">01 / САЙТЫ</span><h3>Независимые проекты</h3><p>Каждый сайт будет жить в отдельном репозитории и публиковаться на GitHub Pages.</p></article><article class="detail-card"><span class="card-number">02 / ДОСТУП</span><h3>Только для вас</h3><p>Вход по коду из письма. Сессия проверяется на сервере при каждом запросе.</p></article></div>
         </section>
         <section id="sites-panel" aria-labelledby="sites-title" hidden><div class="section-header"><h2 id="sites-title">Ваши сайты</h2><span class="muted">Публикация ещё не подключена</span></div><div class="empty-card"><span class="empty-icon" aria-hidden="true">▤</span><h3>Здесь будут ваши сайты</h3><p>На первом этапе список пуст.<br>Создание сайтов появится после подключения GitHub.</p><button type="button" disabled>Создать сайт — позже</button></div></section>
-        <section id="settings-panel" aria-labelledby="access-title" hidden><h2 id="access-title">Доступ к панели</h2><div class="access-card"><dl><div><dt>Способ входа</dt><dd>Код на разрешённую почту</dd></div><div><dt>Текущий пользователь</dt><dd id="identity">Проверяем…</dd></div><div><dt>Публикация сайтов</dt><dd>Ещё не подключена</dd></div></dl><p class="muted">Адрес для входа меняется в настройках доступа Cloudflare.</p></div></section>
+        <section id="settings-panel" aria-labelledby="access-title" hidden><h2 id="access-title">Доступ к панели</h2><div class="access-card"><dl><div><dt>Способ входа</dt><dd>Код на разрешённую почту</dd></div><div><dt>Текущий пользователь</dt><dd id="identity">Проверяем…</dd></div><div><dt>Публикация сайтов</dt><dd>Ещё не подключена</dd></div></dl><p class="muted">Адрес для входа задаётся в серверных настройках Folio.</p></div></section>
         <noscript><p class="error">Для проверки сессии в панели включите JavaScript. Серверная защита доступа действует и без него.</p></noscript>
       </main>
       <footer>Folio CMS<span>Основа готова. Истории впереди.</span></footer>
@@ -56,6 +56,18 @@ export const client = `
 'use strict';
 const byId = (id) => document.getElementById(id);
 const page = window.location.pathname;
+byId('sign-in').href = '/login?next=' + encodeURIComponent(page);
+byId('logout').addEventListener('click', async () => {
+  byId('logout').disabled = true;
+  try {
+    const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(8000), redirect: 'error' });
+    if (!response.ok) throw new Error('logout');
+    window.location.assign('/login');
+  } catch {
+    byId('status-text').textContent = 'Не удалось выйти. Проверьте соединение и повторите.';
+    byId('logout').disabled = false;
+  }
+});
 const pages = {
   '/': ['ОБЗОР', 'Ваше пространство для сайтов', 'Одна панель для ваших независимых проектов.', 'overview-panel'],
   '/sites': ['САЙТЫ', 'Ваши сайты', 'Отдельное место для каждого проекта.', 'sites-panel'],
