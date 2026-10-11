@@ -1,0 +1,5 @@
+# Copy to .dev.vars only for real Access configuration. Never commit .dev.vars.
+# Empty/missing configuration denies every request. No development auth bypass.
+ACCESS_TEAM_DOMAIN="https://YOUR-TEAM.cloudflareaccess.com"
+ACCESS_AUD="YOUR-APPLICATION-AUD"
+ALLOWED_EMAIL="YOUR-EXACT-EMAIL"
