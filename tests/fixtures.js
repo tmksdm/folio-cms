@@ -57,7 +57,7 @@ export function fixture() {
     method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json', Origin: env.APP_ORIGIN } : {}), ...(cookies ? { Cookie: cookies } : {}), ...headers },
     ...(body !== undefined ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
   }), env);
-  const send = (email = env.ALLOWED_EMAIL) => request('/auth/request', { body: { email, turnstile: 'test-token' } });
+  const send = () => request('/auth/request', { body: { turnstile: 'test-token' } });
   const cookieValue = (response, name) => response.headers.getSetCookie().find((value) => value.startsWith(name + '='))?.split(';')[0];
   const code = () => network.sends.at(-1)?.text.match(/\d{6}/)[0];
   const verify = (response, value = code()) => request('/auth/verify', { cookies: cookieValue(response, CHALLENGE_COOKIE), body: { code: value } });

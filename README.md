@@ -16,6 +16,6 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Без настроек `npm.cmd run dev` возвращает 503. Секреты задаёт владелец через Wrangler/Cloudflare Dashboard. `npm.cmd run preview:test` запускает только HTTPS localhost-стенд с настоящим Worker/SQLite и подменой email/CAPTCHA; инструкции воспроизведения — в DEPLOY.md.
+Без настроек `npm.cmd run dev` возвращает 503. Секреты задаёт владелец через Wrangler/Cloudflare Dashboard. `npm.cmd run preview:test` запускает только HTTPS localhost-стенд с настоящим Worker/SQLite и подменой CAPTCHA; инструкции воспроизведения — в DEPLOY.md.
 
 GitHub Actions выполняет install/check/test/build, без автоматического deploy и production secrets. Успех локальных тестов не доказывает работу опубликованного сервиса; Stage 01 требует развёртывания владельцем и внешнего ревью.

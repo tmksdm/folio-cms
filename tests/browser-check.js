@@ -1,5 +1,5 @@
 // Run via playwright-cli run-code --filename tests/browser-check.js against the
-// HTTPS test fixture. Email and CAPTCHA are mocked; Worker and SQLite are real.
+// HTTPS test fixture. The CAPTCHA widget is mocked; Worker and SQLite are real.
 async (page) => {
   const base = 'https://127.0.0.1:4173';
   const failures = [];
@@ -16,10 +16,11 @@ async (page) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(base + '/settings');
     assert(new URL(page.url()).pathname === '/login', 'Protected direct link must require login');
+    assert((await page.locator('#email').count()) === 0, 'Login must not ask for email');
+    assert(!(await page.content()).includes('owner@example.test'), 'Login page must not reveal the owner address');
     await noOverflow();
     await page.screenshot({ path: 'output/playwright/login-' + width + '.png', fullPage: true });
   }
-  await page.locator('#email').fill('owner@example.test');
   await page.route('**/auth/request', (route) => route.abort('internetdisconnected'));
   await page.getByRole('button', { name: 'Получить код', exact: true }).click();
   await page.getByText('Не удалось связаться с сервером.', { exact: false }).waitFor();

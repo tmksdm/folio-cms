@@ -78,8 +78,7 @@ export class AuthStore {
       validation = await response.json();
     } catch { return result(503, { error: 'auth_unavailable' }); }
     if (validation.success !== true || validation.hostname !== config.hostname || validation.action !== 'login') return result(403, { error: 'challenge_failed' });
-    const allowed = typeof body.email === 'string' && body.email.toLowerCase() === config.email;
-    if (!allowed) return result(202, { accepted: true });
+    // The recipient is server-configured ALLOWED_EMAIL; browser data never selects it.
     const nonce = randomToken();
     const nonceHash = await digest(nonce);
     const code = randomCode();

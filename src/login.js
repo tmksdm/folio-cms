@@ -1,8 +1,8 @@
 export function loginHtml(siteKey) {
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Вход — Folio</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/login.css"><script src="/assets/login.js" defer></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script></head><body><main class="login-main"><a class="brand" href="/login"><span class="brand-mark" aria-hidden="true">f.</span>folio<span class="brand-tag">CMS</span></a><div class="access-card"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Вход по почте</h1><p class="lead">Получите одноразовый код и откройте свою панель.</p><form id="request-form"><label for="email">Ваша почта</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required><div class="cf-turnstile" data-sitekey="${siteKey}" data-action="login" data-size="compact"></div><button id="send-code" type="submit">Получить код</button></form><form id="verify-form" hidden><label for="code">Код из письма</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required><p class="muted">Код действует 10 минут. Введите его в этом же браузере.</p><button id="verify-code" type="submit">Войти</button><button id="resend" type="button">Запросить новый код</button></form><p id="login-status" role="status" aria-live="polite"></p><noscript><p>Для входа включите JavaScript.</p></noscript></div></main></body></html>`;
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Вход — Folio</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/login.css"><script src="/assets/login.js" defer></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script></head><body><main class="login-main"><a class="brand" href="/login"><span class="brand-mark" aria-hidden="true">f.</span>folio<span class="brand-tag">CMS</span></a><div class="access-card"><p class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><h1>Вход по почте</h1><p class="lead">Получите одноразовый код и откройте свою панель.</p><form id="request-form"><div class="cf-turnstile" data-sitekey="${siteKey}" data-action="login" data-size="normal"></div><button id="send-code" type="submit">Получить код</button></form><form id="verify-form" hidden><label for="code">Код из письма</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required><p class="muted">Код действует 10 минут. Введите его в этом же браузере.</p><button id="verify-code" type="submit">Войти</button><button id="resend" type="button">Запросить новый код</button></form><p id="login-status" role="status" aria-live="polite"></p><noscript><p>Для входа включите JavaScript.</p></noscript></div></main></body></html>`;
 }
 export const loginCss = `
-.login-main{max-width:480px;padding:36px 20px;margin:0 auto}.login-main>.brand{margin-bottom:32px}.login-main h1{font-size:30px}.login-main form{display:grid;gap:14px;margin-top:24px}.login-main input{font:inherit;width:100%;min-width:0;padding:12px;border:1px solid #9bac99;border-radius:7px;background:#fff}.login-main label{font-size:14px}.login-main .cf-turnstile{min-height:140px;max-width:100%}#login-status{font-size:14px;overflow-wrap:anywhere}#resend{background:#fff}.login-main button:disabled{cursor:wait}
+.login-main{max-width:480px;padding:36px 20px;margin:0 auto}.login-main>.brand{margin-bottom:32px}.login-main h1{font-size:30px}.login-main form{display:grid;gap:14px;margin-top:24px}.login-main input{font:inherit;width:100%;min-width:0;padding:12px;border:1px solid #9bac99;border-radius:7px;background:#fff}.login-main label{font-size:14px}.login-main .cf-turnstile{min-height:65px}#login-status{font-size:14px;overflow-wrap:anywhere}#resend{background:#fff}.login-main button:disabled{cursor:wait}@media (max-width:359px){.login-main{padding:36px 8px}.login-main .cf-turnstile{min-height:55px;zoom:.85}}
 `;
 export const loginClient = `
 'use strict';
@@ -37,7 +37,7 @@ byId('request-form').addEventListener('submit', async (event) => {
   if (pending) return;
   const turnstile = new FormData(event.currentTarget).get('cf-turnstile-response');
   if (!turnstile) { byId('login-status').textContent = 'Сначала пройдите проверку защиты.'; return; }
-  const accepted = await submit('/auth/request', { email: byId('email').value, turnstile });
+  const accepted = await submit('/auth/request', { turnstile });
   if (window.turnstile) window.turnstile.reset();
   if (accepted) {
     byId('request-form').hidden = true;
@@ -58,6 +58,6 @@ byId('resend').addEventListener('click', () => {
   byId('request-form').hidden = false;
   byId('code').value = '';
   byId('login-status').textContent = 'Между отправками нужна минута. Новый код заменит предыдущий.';
-  byId('email').focus();
+  byId('send-code').focus();
 });
 `;

@@ -32,7 +32,7 @@ test('auth POST endpoints reject CSRF, wrong media type, huge and malformed bodi
   }
 }));
 test('Turnstile validates success, expected hostname/action and handles failure', () => check(async (f) => {
-  assert.equal((await f.request('/auth/request', { body: { email: f.env.ALLOWED_EMAIL } })).status, 403);
+  assert.equal((await f.request('/auth/request', { body: {} })).status, 403);
   for (const [key, value] of [['invalidTurnstile', true], ['hostname', 'evil.test'], ['action', 'other']]) {
     const before = f.network[key]; f.network[key] = value;
     assert.equal((await f.send()).status, 403); f.network[key] = before;
@@ -41,14 +41,16 @@ test('Turnstile validates success, expected hostname/action and handles failure'
   const response = await f.send(); assert.equal(response.status, 503); assert.doesNotMatch(await response.text(), /sensitive/);
   assert.equal(f.network.sends.length, 0);
 }));
-test('non-owner receives generic response and cannot establish session', () => check(async (f) => {
-  const response = await f.send('other@example.test');
+test('login page never shows the owner address and browser email cannot change the recipient', () => check(async (f) => {
+  const page = await f.request('/login');
+  assert.doesNotMatch(await page.text(), new RegExp(f.env.ALLOWED_EMAIL.split('.').join('\\.'), 'i'));
+  const response = await f.request('/auth/request', { body: { email: 'other@example.test', turnstile: 'test-token' } });
   assert.equal(response.status, 202); assert.deepEqual(await response.json(), { accepted: true });
-  assert.ok(f.cookieValue(response, CHALLENGE_COOKIE)); assert.equal(f.network.sends.length, 0);
-  assert.equal((await f.verify(response, '123456')).status, 403);
+  assert.ok(f.cookieValue(response, CHALLENGE_COOKIE)); assert.equal(f.network.sends.length, 1);
+  assert.deepEqual(f.network.sends[0].to, [f.env.ALLOWED_EMAIL]);
 }));
-test('full login uses owner email, one-time code, hashed state and protected cookie', () => check(async (f) => {
-  const issued = await f.send(f.env.ALLOWED_EMAIL.toUpperCase());
+test('full login uses one-time code, hashed state and protected cookie without asking email', () => check(async (f) => {
+  const issued = await f.send();
   assert.equal(issued.status, 202); assert.match(f.code(), /^\d{6}$/);
   assert.deepEqual(f.network.sends[0].to, [f.env.ALLOWED_EMAIL]);
   assert.equal(f.network.sends[0].from, 'Folio <onboarding@resend.dev>');
@@ -87,8 +89,9 @@ test('parallel send requests charge durable reservation before network, allowing
   assert.equal(f.network.sends.length, 1);
 }));
 test('request flood is bounded before calling Turnstile', () => check(async (f) => {
-  const responses = await Promise.all(Array.from({ length: 40 }, () => f.send('other@example.test')));
-  assert.equal(responses.filter((r) => r.status === 429).length, 10); assert.equal(f.network.turnstile, 30);
+  const responses = await Promise.all(Array.from({ length: 40 }, () => f.send()));
+  assert.equal(responses.filter((r) => r.status === 202).length, 1); assert.equal(responses.filter((r) => r.status === 429).length, 39);
+  assert.equal(f.network.turnstile, 30); assert.equal(f.network.sends.length, 1);
 }));
 test('upstream send failure produces no usable challenge and still charges cooldown', () => check(async (f) => {
   f.network.failSend = true;
@@ -149,18 +152,23 @@ test('cookies reject duplicates and malformed values; client parses and never st
   for (let i = 0; i < 100; i++) assert.match(randomCode(), /^\d{6}$/);
 });
 
-test('foreign IP request flood and unrelated verification cookies cannot lock owner out', () => check(async (f) => {
-  await Promise.all(Array.from({ length: 40 }, () => f.request('/auth/request', { body: { email: 'other@example.test', turnstile: 'token' }, headers: { 'cf-connecting-ip': '198.51.100.1' } })));
-  const issued = await f.request('/auth/request', { body: { email: f.env.ALLOWED_EMAIL, turnstile: 'token' }, headers: { 'cf-connecting-ip': '198.51.100.2' } });
-  assert.equal(issued.status, 202);
-  await Promise.all(Array.from({ length: 80 }, () => f.request('/auth/verify', { body: { code: '000000' } })));
-  assert.equal((await f.verify(issued)).status, 200);
+test('foreign IP request flood consumes one send at most and cannot lock the owner out permanently', () => check(async (f) => {
+  const originalNow = Date.now; let now = originalNow(); Date.now = () => now;
+  try {
+    await Promise.all(Array.from({ length: 40 }, () => f.request('/auth/request', { body: { turnstile: 'token' }, headers: { 'cf-connecting-ip': '198.51.100.1' } })));
+    assert.equal(f.network.sends.length, 1);
+    await Promise.all(Array.from({ length: 80 }, () => f.request('/auth/verify', { body: { code: '000000' } })));
+    now += 60_000;
+    const issued = await f.request('/auth/request', { body: { turnstile: 'token' }, headers: { 'cf-connecting-ip': '198.51.100.2' } });
+    assert.equal(issued.status, 202);
+    assert.equal((await f.verify(issued)).status, 200);
+  } finally { Date.now = originalNow; }
 }));
 test('request IP counters are bounded and expire without resetting owner send quota', () => check(async (f) => {
   const originalNow = Date.now; let now = originalNow(); Date.now = () => now;
   try {
-    for (let i = 0; i < 256; i++) assert.equal((await f.request('/auth/request', { body: { email: 'other@example.test', turnstile: 'token' }, headers: { 'cf-connecting-ip': String(i) } })).status, 202);
-    assert.equal((await f.send('other@example.test')).status, 429);
+    for (let i = 0; i < 256; i++) assert.equal((await f.request('/auth/request', { body: { turnstile: 'token' }, headers: { 'cf-connecting-ip': String(i) } })).status, i === 0 ? 202 : 429);
+    assert.equal((await f.send()).status, 429);
     now += 60_000; assert.equal((await f.send()).status, 202);
   } finally { Date.now = originalNow; }
 }));

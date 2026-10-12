@@ -61,9 +61,9 @@ export default {
         let body;
         try { body = await readJson(request); } catch { return failure(400, 'invalid_request'); }
         if (path === '/auth/request') {
-          const outcome = await callAuth(env, '/request', { email: body.email, turnstile: body.turnstile, ip: request.headers.get('cf-connecting-ip') });
+          const outcome = await callAuth(env, '/request', { turnstile: body.turnstile, ip: request.headers.get('cf-connecting-ip') });
           if (outcome.status !== 202) return failure(outcome.status, outcome.error);
-          // Identical response shape/cookie for non-owner addresses; no identity disclosure.
+          // Neutral public response; the recipient is never disclosed.
           return reply(JSON.stringify({ accepted: true }), 202, undefined, { 'Set-Cookie': cookie(CHALLENGE_COOKIE, outcome.challenge || randomToken(), CODE_TTL) });
         }
         if (path === '/auth/verify') {
