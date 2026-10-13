@@ -42,19 +42,26 @@
 
 Выбран вариант **D**: GitHub App, installation-токен для всех вызовов, включая создание репозитория. Причина — только он даёт полную автоматизацию без обслуживания токенов: токен живёт час и выпускается сервером заново из JWT, ничего хранить не нужно, а после одноразовой установки приложения владелец в процессе не участвует.
 
-**Почему это не тот случай, о котором говорит ревью.** На 2026-10-13 официальная документация GitHub перечисляет installation access tokens для `POST /user/repos`:
+**Проверено на живом аккаунте `tmksdm` 2026-10-13: вариант D выполняется не полностью.** Приложение `folio-cms-pages` (App ID 5299581) установлено на `tmksdm` (установка `170953323`, `repository_selection: all`), выданные права — `administration: write`, `contents: write`, `pages: write`, `metadata: read`. Installation-токен на этом аккаунте умеет всё, кроме одного вызова:
+
+- создание файлов и коммитов: `PUT /repos/.../contents/folio.json` → `201`; Git Data API (blobs → trees → commits → refs) → `201`/`200`;
+- включение Pages: `POST /repos/.../pages` → `201` (`build_type: legacy`, `https_enforced: true`), `GET /repos/.../pages` → `200`, `GET /repos/.../pages/builds` → `200`;
+- видимость репозиториев: `GET /installation/repositories?per_page=100` вернул 41 из 41, включая созданный в ходе эксперимента;
+- **`POST /user/repos` → `403 Rate Limit Exceeded`.** Три попытки с интервалами 90 секунд дали тот же ответ при неизрасходованном лимите (`x-ratelimit-limit: 6000`, `remaining: 5992`) и заголовке `x-accepted-github-permissions: administration=write; repository_creation=write`. Тот же вызов user-токеном `gh` (scope `repo`) в тот же момент создал репозиторий (`201`), то есть отказ специфичен для installation-токена, а не для аккаунта, прав или лимита; сообщение GitHub причины не отражает.
+
+Документация обещала обратное, и это тот случай, когда контракт разошёлся с наблюдением:
 
 - В справочнике прав (машиночитаемые данные страницы) запись этого вызова: `{"slug":"create-a-repository-for-the-authenticated-user","verb":"post","requestPath":"/user/repos","access":"write","user-to-server":true,"server-to-server":true}`. `server-to-server: true` — это и есть installation access token; для сравнения, `GET /user/repos` там же имеет `server-to-server: false`.
 - На странице endpoint'а блок «Fine-grained access tokens for "Create a repository for the authenticated user"» содержит ссылку **GitHub App installation access tokens** (рядом с user access tokens и fine-grained PAT) и набор прав «Administration» (write) либо «Repository creation» (write).
 
-Документация — это контракт, а не наблюдение за работой API, поэтому окончательным доказательством для личного аккаунта `tmksdm` я это не объявляю. Первым шагом реализации идёт **предварительная проверка на живом аккаунте**: приложение создаёт один пробный публичный репозиторий, в него пишется `folio.json`, включается Pages и читается статус. Один прогон подтверждает или опровергает всю схему до того, как на ней что-то построено.
+Документация — это контракт, а не наблюдение за работой API. Предварительная проверка на живом аккаунте выполнена 2026-10-13 и показала, что для личного аккаунта `tmksdm` контракт не выполняется: installation-токен репозиторий создать не может, хотя для всех остальных вызовов он работает.
 
-Если предварительная проверка покажет, что installation-токен не может создать репозиторий в личном аккаунте, применяется запасной вариант **A**: installation-токен остаётся для управления (файлы, темы, Pages), а создание репозитория выполняется user access token того же приложения. Это единственное место, где нужен второй токен; сложность обоснована и описана ниже.
+Запасной вариант **A** остаётся предусмотренным ответом плана на этот результат: installation-токен работает для управления (файлы, темы, Pages, статус), а создание репозитория выполняет user access token того же приложения. Это единственное место, где нужен второй токен; сложность обоснована и описана ниже. Переход на A — решение владельца: в эксперименте владелец разрешил однократно создать пробный репозиторий user-токеном `gh`, чтобы проверить остальные шаги, и это не является приёмкой архитектуры Stage 02. Второй вариант, не требующий второго токена, — оставить создание репозитория владельцу (одно действие в веб-интерфейсе на сайт), что противоречит цели «создание сайта с телефона без ручных действий».
 
 | Вариант | Создание репозитория в личном аккаунте | Автоматическое обновление | Секреты в Worker | Хранимое состояние | Сложность |
 |---|---|---|---|---|---|
-| **D. installation-токен (выбран)** | по документации да (`server-to-server: true`); подтверждается предварительной проверкой | да: JWT (≤10 мин) → токен на 1 час, при каждом промахе кэша выпускается новый | App ID, приватный ключ, owner | нет | минимальная |
-| A. user-токен для создания, installation для остального | по документации да (`user-to-server: true`) | да, но только если включено истечение и настроен refresh: токен 8 ч, refresh 6 мес, одноразовая ротация | App ID, ключ, owner, client ID, client secret | долгоживущий refresh-токен (ротация) → нужна запись в Durable Object | средняя |
+| **D. installation-токен (выбран)** | проверено 2026-10-13: **нет** — `403 Rate Limit Exceeded` при выданном `Administration` (write) и неизрасходованном лимите | да: JWT (≤10 мин) → токен на 1 час, при каждом промахе кэша выпускается новый | App ID, приватный ключ, owner | нет | минимальная |
+| A. user-токен для создания, installation для остального | да — подтверждено 2026-10-13: user-токен `gh` создал репозиторий (`201`) | да, но только если включено истечение и настроен refresh: токен 8 ч, refresh 6 мес, одноразовая ротация | App ID, ключ, owner, client ID, client secret | долгоживущий refresh-токен (ротация) → нужна запись в Durable Object | средняя |
 | B. user-токен для всех вызовов | да | то же | то же | то же | средняя |
 | C. fine-grained PAT | по документации да (fine-grained PAT в списке для того же endpoint'а) | нет: токен статичный (бессрочный допустим, по умолчанию 30 дней) | один PAT | нет | низкая, но долгоживущий bearer-секрет |
 
@@ -74,7 +81,7 @@
 | `POST /app/installations/{id}/access_tokens` | JWT приложения | — |
 | `GET /installation/repositories` | installation | `Metadata` (read) |
 | `GET /repos/{owner}/{repo}` | installation | `Metadata` (read) |
-| `POST /user/repos` | installation | `Administration` (write) либо `Repository creation` (write) |
+| `POST /user/repos` | installation | `Administration` (write) либо `Repository creation` (write) — право выдано и подтверждено (`x-accepted-github-permissions`), вызов всё равно отклоняется `403`; рабочий путь — user-токен |
 | `GET`/`PUT` `/repos/{owner}/{repo}/contents/{path}` | installation | `Contents` (write) |
 | `PUT /repos/{owner}/{repo}/topics` | installation | `Administration` (write) |
 | `GET`/`POST` `/repos/{owner}/{repo}/pages` | installation | `Pages` (write) + `Administration` (write) |
@@ -83,7 +90,7 @@
 
 Итоговый набор прав приложения: `Administration` (write), `Pages` (write), `Contents` (write), `Metadata` (read). Право `Workflows` не запрашивается: каталог `.github/workflows` Folio не трогает, а без этого права GitHub отклоняет запись в него (документация Contents API). Источники: [Create a repository for the authenticated user](https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user), [Create a GitHub Pages site](https://docs.github.com/en/rest/pages/pages#create-a-github-pages-site), [права приложений](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), [user-токены](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app), [обновление user-токенов](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens), [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
 
-JWT и токен: подпись `RS256`, claim'ы `iss` = App ID, `iat` на 60 секунд назад, `exp` не более 10 минут; далее `POST /app/installations/{id}/access_tokens` → installation-токен на 1 час, лимит 5 000 запросов в час. Ключ приложения GitHub отдаёт в PEM `PKCS#1 RSAPrivateKey`, а WebCrypto принимает только `PKCS#8`: конвертация `openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.key`. Подпись RS256 и импорт `pkcs8` в Workers поддержаны ([Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)).
+JWT и токен: подпись `RS256`, claim'ы `iss` = App ID, `iat` на 60 секунд назад, `exp` не более 10 минут; далее `POST /app/installations/{id}/access_tokens` → installation-токен на час. Наблюдённый лимит установки 2026-10-13 — 6 000 запросов в час (`x-ratelimit-limit: 6000`), а не 5 000, как предполагалось. Ключ, скачанный из интерфейса приложения 2026-10-13, — PEM `PKCS#1 RSAPrivateKey`, RSA 2048 (пункт «Credentials → Key pairs → New key»; раздел «Private keys» в текущем интерфейсе отсутствует), а WebCrypto принимает только `PKCS#8`: конвертация `openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.key` остаётся обязательной для Worker. Подпись RS256 и импорт `pkcs8` в Workers поддержаны ([Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)).
 
 Секреты: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PKCS#8), `GITHUB_OWNER` — логин аккаунта, которому принадлежат сайты (используется для выбора установки, построения адреса `https://<owner>.github.io/<name>` и запрета любых действий в чужом аккаунте). Запасной вариант A добавил бы `GITHUB_CLIENT_ID` и `GITHUB_CLIENT_SECRET`.
 
@@ -136,7 +143,7 @@ JWT и токен: подпись `RS256`, claim'ы `iss` = App ID, `iat` на 6
 
 ### Публикация Pages
 
-Настройка: `build_type: "legacy"` и `source: {branch:"main", path:"/"}` — сборка из ветки, без workflow-файлов и без права `Workflows`. `.nojekyll` записывается до включения Pages; GitHub описывает этот файл как признак того, что ветка не требует шага сборки, а не как гарантию поведения — поэтому в эксперименте (шаг 1) сборка проверяется и с файлом, и без него.
+Настройка: `build_type: "legacy"` и `source: {branch:"main", path:"/"}` — сборка из ветки, без workflow-файлов и без права `Workflows`. `.nojekyll` записывается до включения Pages; GitHub описывает этот файл как признак того, что ветка не требует шага сборки, а не как гарантию поведения — поэтому в эксперименте (шаг 1) сборка проверяется и с файлом, и без него. Проверено 2026-10-13: `POST /repos/.../pages` вернул `201` с `build_type: legacy` и `https_enforced: true`, а первая сборка после включения Pages завершилась `errored` («Page build failed.»), последующие — `built` за 3–44 с. Единичный сбой ранней сборки наблюдён на живом репозитории, поэтому интерфейсу нужен повтор проверки, а не вывод «сайт сломан».
 
 «Pages настроены» и «сайт доступен» — разные состояния. Первое: `GET /repos/{owner}/{repo}/pages` вернул сайт со `status`. Второе: реальный `GET https://<owner>.github.io/<name>/` из Worker со статусом `200` и меткой страницы `<meta name="folio-site" content="<name>">`. В интерфейсе это «публикуется» и «опубликован».
 
@@ -144,28 +151,39 @@ JWT и токен: подпись `RS256`, claim'ы `iss` = App ID, `iat` на 6
 
 Ограничение времени в Worker: на Free это 10 мс CPU на запрос, ожидание сети в CPU не считается — ограничивают число подзапросов (50 на запрос на Free) и терпение клиента. Поэтому каждый вызов GitHub идёт с `AbortSignal.timeout(8000)` (как в Stage 01), запрос создания делает не более ~12 подзапросов и никогда не ждёт сборку, а статус публикации проверяется отдельными вызовами. Исчерпание бюджета — ошибка «не завершено, повторите»; повтор безопасен. [Лимиты Workers](https://developers.cloudflare.com/workers/platform/limits/).
 
-### Адреса статей: требование сохраняется, нужен эксперимент
+### Адреса статей: требование выполнимо статическим файлом `YYMMDD.html`
 
-Требование владельца остаётся в силе: `/site-name/YYMMDD` без `.html` и без завершающего слеша. Окончательный вывод не сделан.
+Требование владельца — `/site-name/YYMMDD` без `.html` и без завершающего слеша — **выполняется**, и Jekyll для этого не нужен. Измерено 2026-10-13 на живом репозитории `tmksdm/folio-pages-probe` (`https://tmksdm.github.io/folio-pages-probe/`) в состоянии, в котором будет работать Folio: записан `.nojekyll`, статьи — статические файлы, `YYMMDD.html` лежит в корне.
 
-Наблюдения на чужих Pages-сайтах 2026-10-12 (curl, `Server: GitHub.com`): каталог с `index.html` без слеша → `301` на адрес со слешем; файл без расширения (`CNAME`, `.nojekyll`) → `200` с `Content-Type: application/octet-stream`; несуществующий путь → `404` с содержимым `404.html`. Это наблюдения на чужих сайтах, а не доказательство: поведение может зависеть от содержимого файла, заголовков запроса и обработки Jekyll.
+| Адрес | HTTP | `Location` | `Content-Type` | Итог |
+|---|---|---|---|---|
+| `/YYMMDD` (файл `YYMMDD.html`) | `200` | — | `text/html; charset=utf-8` | **требование выполнено**; в браузере адресная строка остаётся `/folio-pages-probe/261013` |
+| `/YYMMDD.html` | `200` | — | `text/html; charset=utf-8` | прямая ссылка на тот же файл |
+| `/YYMMDD/` | `404` | — | `text/html; charset=utf-8` | каталога нет, существует только файл |
+| `/b` при файле `b.html` | `200` | — | `text/html; charset=utf-8` | подтверждает подстановку расширения |
+| `/a` при файле `a/index.html` | `301` | `…/a/` | `text/html` | каталог без слеша переадресуется — не годится |
+| `/c` — файл без расширения | `200` | — | `application/octet-stream` | браузер скачивает файл, переход прерывается (`ERR_FAILED`) — не годится |
+| `/_redirects` | `200` | — | `application/octet-stream` | файл отдаётся как есть; правил переадресации GitHub Pages не применяет |
+| несуществующий путь | `404` | — | `text/html; charset=utf-8` | тело ответа берётся из `404.html` (только измерение, механизмом публикации не является) |
 
-Таблица измерений на своём пробном репозитории (запуск только после разрешения владельца):
+Тот же репозиторий в режиме Jekyll — посты с именами вида `YYYY-MM-DD-slug.md` и явным `permalink: /261013`:
 
-| Проверка | Адрес | Что фиксируем |
+| Адрес | HTTP | `Content-Type` |
 |---|---|---|
-| базовая страница | `/probe/` | `200`, `Content-Type` |
-| каталог без слеша | `/probe/a` | статус, `Location`, итоговый адрес в адресной строке |
-| каталог со слешем | `/probe/a/` | `200`, MIME |
-| `.html` без расширения в адресе | `/probe/b` при файле `b.html` | есть ли подстановка расширения |
-| файл без расширения с HTML | `/probe/c` | статус, MIME, отображается или скачивается |
-| то же с `Accept: text/html` | `/probe/c` | влияет ли согласование содержимого |
-| Jekyll-пост | `/probe/YYMMDD`, `/probe/YYMMDD/` | раскладка файлов, статус, `Location`, MIME |
-| ветка без `.nojekyll` | `/probe/` | влияет ли Jekyll на раскладку |
-| поддержка `_redirects` | `/probe/d` при `d/index.html` и `_redirects` | влияет ли файл вообще |
-| поведение 404 | `/probe/nope` | статус и содержимое (только измерение) |
+| `/261013` (Jekyll permalink) | `200` | `text/html; charset=utf-8` |
+| `/261013/` | `404` | `text/html` |
+| `/2026/10/13/default.html` (permalink по умолчанию) | `200` | `text/html` |
+| `/_redirects` | `404` | `text/html` |
 
-Успехом считается только комбинация «`200` + `text/html` + адрес ровно `/YYMMDD`» без редиректа. Если её не даёт ни одна проверка, решение принимает владелец: принять `301` (адрес для набора и пересылки не меняется, финальный адрес получает слеш) либо изменить требование. Вариант с `404.html` как механизмом публикации статей не применяется без отдельного решения владельца.
+Что из этого следует:
+
+- Простейшая форма — статический файл `YYMMDD.html`, а ссылки ведут на `/YYMMDD`. Jekyll, `_redirects` и согласование `Accept` для этого не нужны. Вариант `YYMMDD/index.html` отпадает из-за `301`, вариант файла без расширения — из-за `application/octet-stream`: браузер скачивает его вместо показа.
+- Запрос без расширения работает и с `.nojekyll`, и без него: подстановка `.html` от Jekyll не зависит. Но без `.nojekyll` Jekyll обрабатывает репозиторий и не публикует файлы и каталоги с `_` в начале, поэтому `.nojekyll` записывается всегда.
+- Jekyll принимает посты только с именем `YYYY-MM-DD-slug.md`: файл `261013-probe.md` он игнорирует молча, и адрес `/261013` отдаёт `404`. Это наблюдённый отказ, а не предположение; для статической публикации он несущественен.
+- `_redirects` (возможность Cloudflare Pages) на GitHub Pages не поддерживается.
+- Согласование по `Accept: text/html` не изменило ни один статус и ни один `Content-Type`.
+
+Выбор схемы публикации (статический `YYMMDD.html` плюс `.nojekyll`) — предмет решения владельца: здесь зафиксировано измерение, а не изменение требования. Требование осталось прежним и выполнено без послаблений.
 
 ### Список сайтов, независимость, телефон
 
