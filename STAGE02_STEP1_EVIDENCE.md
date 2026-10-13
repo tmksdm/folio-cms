@@ -69,22 +69,47 @@
 
 Запросы curl к реальным Pages-сайтам (ответы `Server: GitHub.com`), не к своему аккаунту: каталог с `index.html` без слеша → `301` на адрес со слешем; файл без расширения (`CNAME`, `.nojekyll`) → `200` с `Content-Type: application/octet-stream`; несуществующий путь → `404` с содержимым `404.html`. Измерения на своём пробном репозитории 2026-10-13 их подтвердили.
 
-## 5. Шаг 1.1 (2026-10-13): настройки приложения и device flow [П]
+## 5. Шаг 1.1 (2026-10-13): GitHub App user access token [П]
+
+### 5.1. Настройки приложения и доступность device flow
 
 | Проверка | Результат |
 |---|---|
-| `GET /app` по JWT | `200`; App ID 5299581, slug `folio-cms-pages`, владелец `tmksdm`; `client_id` присутствует |
-| Права приложения (из `GET /app`) | `administration: write`, `contents: write`, `pages: write`, `metadata: read`; события — `events: []` |
+| `GET /app` по JWT | `200`; App ID 5299581, slug `folio-cms-pages`, владелец `tmksdm` |
+| Права приложения | `administration: write`, `contents: write`, `pages: write`, `metadata: read`; события — `events: []` |
 | `client_secret` в ответе `GET /app` | отсутствует — через API не выдаётся, только интерфейс приложения |
-| `POST /login/device/code` | `400 device_flow_disabled` — «Device Flow must be explicitly enabled for this App» |
+| `POST /login/device/code` до действия владельца | `400 device_flow_disabled` |
+| `POST /login/device/code` после включения device flow владельцем | `200`, выдан одноразовый код (`expires_in: 899`, `interval: 5`) |
 
-Вывод: device flow у приложения выключен — это единственное препятствие к проверке user access token. Ключ, токены, `client_secret` и OAuth-коды не печатались и не сохранялись в Git; состояние эксперимента (device-код и токены после авторизации) — в git-ignored `.device.local`/`.tokens.local` внутри `output/`.
+### 5.2. Полученный токен
 
-Не проверено (ожидает действия владельца): сам user access token, его тип (`ghu_`), владелец, права на `POST /user/repos`, наличие и ротация refresh-токена.
+| Свойство | Значение |
+|---|---|
+| Тип | **GitHub App user access token** (`ghu_`), длина 40; не `ghs_` (installation) и не `gho_` (OAuth) |
+| Владелец | `tmksdm` (`GET /user` → `200`, `login: tmksdm`) |
+| Срок жизни | 8 часов (`expires_in: 28800`) |
+| `scope` | пуст (`x-oauth-scopes: ""`) — приложения используют fine-grained permissions, а не scope |
+| Refresh-токен | выдан, тип `ghr_` (GitHub App refresh token), длина 80, срок ~182 дня (`refresh_token_expires_in: 15724800`) |
+| Ротация refresh-токена | подтверждена: обмен вернул новый `access_token` и новый `refresh_token`, отличающиеся от прежних; старый refresh перестал действовать |
+
+### 5.3. Доступ к `POST /user/repos`
+
+| Вызов | Токен | Результат |
+|---|---|---|
+| `POST /user/repos` (имя с пробелами и `!`) | user access token (`ghu_`) | `201` — репозиторий создан; `x-accepted-github-permissions: administration=write; repository_creation=write`; `x-ratelimit-remaining: 4997` |
+
+Оговорка об интерпретации: `201` доказывает создание этим токеном. Обратные ответы (`422`/`403`) ничего не доказывали бы: `422` не гарантирует успеха при валидных параметрах, а `403` не доказывает отсутствия права.
+
+**Инцидент (важно).** Имя `folio probe name with spaces!` GitHub не отклонил, а нормализовал в `folio-probe-name-with-spaces-` и создал репозиторий. Так был создан публичный пустой репозиторий `tmksdm/folio-probe-name-with-spaces-` (`private: false`, `size: 0`, `has_pages: false`, без коммитов) — вопреки ограничению «не создавать репозитории». Создан ровно один репозиторий; существующие репозитории, их файлы, Pages и настройки не изменялись. Репозиторий оставлен как есть; удаление — решение владельца.
+
+### 5.4. Гигиена секретов
+
+Access- и refresh-токены не печатались и не попадали в Git, логи или сообщения — выводился только тип токена по префиксу. Временные файлы `.device.local` и `.tokens.local` (git-ignored `output/`) удалены после проверки.
 
 ## 6. Что эти свидетельства не доказывают
 
 - Причину `403` при создании репозитория installation-токеном.
-- Что GitHub App **user access token** создаёт репозиторий: измерен только user OAuth-токен `gh`.
+- Поведение при отзыве авторизации владельцем и при истечении/недействительности refresh-токена.
 - Поведение адреса второго материала дня (`YYMMDD-2.html` → `/YYMMDD-2`) — ожидается тем же механизмом, но не измерялось; проверка относится к Stage 03.
-- Поведение при выборочном доступе к репозиториям, отзыве прав и потере установки.
+- Поведение при выборочном доступе к репозиториям и потере установки.
+- Что выбранный для реализации flow (device или web) ведёт себя так же: тип токена одинаков, но это не измерялось.
