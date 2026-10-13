@@ -1,0 +1,77 @@
+# Свидетельства измерений: Stage 02, шаг 1 (2026-10-13)
+
+Очищенные от секретов, воспроизводимые свидетельства эксперимента на живом GitHub для шага 1 Stage 02. Это **не** документ состояния (состояние — `PROJECT_STATE.md`) и **не** план (`ARCHITECTURE.md`): здесь только результаты измерений. Секретов нет — ни приватного ключа, ни JWT, ни access/refresh-токенов, ни значений чувствительных заголовков; App ID и ID установки секретами не являются.
+
+Уровни доказательств: **[П]** — прямой ответ живого GitHub; **[И]** — наше HTTP-измерение (независимым ревьюером не проверено).
+
+Аккаунт: `tmksdm`. Приложение: `folio-cms-pages`, App ID 5299581, homepage `https://folio-admin.doridupa.workers.dev`. Установка: `170953323` на `tmksdm`, `repository_selection: all`. Выданные права: `administration: write`, `contents: write`, `pages: write`, `metadata: read`.
+
+Инструмент: `probe.mjs` (локальный, вне Git; подкоманды `raw | token | create | push | urls | wait`), измеритель адресов делает `fetch` с `redirect: manual` и читает `status`, `location`, `content-type`; ключ подписи JWT читается из файла вне репозитория, токены вырезаются из вывода. Команды восстановления: `node probe.mjs token` → `create` → `push jekyll` → `wait` → `urls` → `push nojekyll` → `urls`.
+
+## 1. Installation-токен и управление [П]
+
+| Операция | Результат |
+|---|---|
+| JWT (RS256) → `POST /app/installations/170953323/access_tokens` | `201`, токен на 1 час |
+| `GET /installation/repositories?per_page=100` | `200`, `total_count` 41, включая новый репозиторий |
+| `PUT /repos/tmksdm/folio-pages-probe/contents/folio.json` | `201` |
+| Git Data API (blob → tree → commit → ref) | `201` / `200` |
+| `POST /repos/tmksdm/folio-pages-probe/pages` | `201`, `build_type: legacy`, `https_enforced: true` |
+| `GET /repos/tmksdm/folio-pages-probe/pages` | `200` |
+| `GET /repos/tmksdm/folio-pages-probe/pages/builds` | `200`; сборки `built` за 3–44 с |
+
+Первая сборка после включения Pages завершилась `errored` («Page build failed.»), последующие — `built`.
+
+Ключ: скачанный из интерфейса — PEM `PKCS#1 RSAPrivateKey`, RSA 2048 (Credentials → Key pairs → New key; раздел «Private keys» в текущем интерфейсе отсутствует). WebCrypto принимает `PKCS#8`, поэтому для Worker нужна конвертация `openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt`.
+
+Лимит installation-токена, наблюдавшийся в ответах: `x-ratelimit-limit: 6000` в час (не 5000, как предполагалось по документации).
+
+## 2. Создание репозитория [П]
+
+| Вызов | Токен | Результат |
+|---|---|---|
+| `POST /user/repos` | installation access token | `403`, тело `{"message":"Rate Limit Exceeded"}`; воспроизведено 3 раза с интервалами 90 с |
+| `POST /user/repos` | user OAuth-токен `gh` (scope `repo`) | `201` — репозиторий создан |
+
+Сохранённые заголовки ответа `403`: `x-ratelimit-limit: 6000`, `x-ratelimit-remaining: 5992` (первичный лимит не исчерпан), `x-accepted-github-permissions: administration=write; repository_creation=write`.
+
+**Причина `403` не установлена.** Неизрасходованный первичный лимит не исключает secondary rate limiting, abuse detection и других серверных ограничений GitHub; сообщение `Rate Limit Exceeded` их не различает. Что **не сохранено** и потому неизвестно: `retry-after`, `documentation_url`, `x-github-request-id`, полное тело ответа. Что не проверялось: поведение того же вызова с заведомо невалидным телом и после окна `x-ratelimit-reset`. Переносить результат user-токена `gh` на user access token приложения нельзя — это другой тип токена и другая выдача.
+
+## 3. Адреса GitHub Pages [И]
+
+Репозиторий `tmksdm/folio-pages-probe`, сайт `https://tmksdm.github.io/folio-pages-probe/`. Каждый адрес измерен дважды: обычным запросом и с `Accept: text/html`; ни один статус и ни один `Content-Type` от этого не изменились.
+
+### Основная схема: `.nojekyll`, статические файлы
+
+| Адрес | HTTP | `Location` | `Content-Type` | Вывод |
+|---|---|---|---|---|
+| `/YYMMDD` (файл `YYMMDD.html`) | `200` | — | `text/html; charset=utf-8` | требование выполнено; в браузере адресная строка остаётся `/folio-pages-probe/261013` |
+| `/YYMMDD.html` | `200` | — | `text/html; charset=utf-8` | прямая ссылка на тот же файл |
+| `/YYMMDD/` | `404` | — | `text/html; charset=utf-8` | каталога нет, существует только файл |
+| `/b` при файле `b.html` | `200` | — | `text/html; charset=utf-8` | подтверждает подстановку расширения |
+| `/a` при файле `a/index.html` | `301` | `…/a/` | `text/html` | каталог без слеша переадресуется — не годится |
+| `/c` — файл без расширения | `200` | — | `application/octet-stream` | браузер скачивает файл, переход прерывается (`ERR_FAILED`) — не годится |
+| `/_redirects` | `200` | — | `application/octet-stream` | отдаётся как файл; правил переадресации GitHub Pages не применяет |
+| несуществующий путь | `404` | — | `text/html; charset=utf-8` | тело ответа берётся из `404.html` (измерение, механизмом публикации не является) |
+
+### Режим Jekyll: посты `YYYY-MM-DD-slug.md` с явным permalink
+
+| Адрес | HTTP | `Content-Type` |
+|---|---|---|
+| `/261013` (Jekyll permalink) | `200` | `text/html; charset=utf-8` |
+| `/261013/` | `404` | `text/html` |
+| `/2026/10/13/default.html` (permalink по умолчанию) | `200` | `text/html` |
+| `/_redirects` | `404` | `text/html` |
+
+Файл `261013-probe.md` (имя без `YYYY-MM-DD-slug`) Jekyll игнорирует молча, и адрес `/261013` отдаёт `404` — для статической публикации это несущественно.
+
+## 4. Наблюдения на чужих GitHub Pages (2026-10-12) [И]
+
+Запросы curl к реальным Pages-сайтам (ответы `Server: GitHub.com`), не к своему аккаунту: каталог с `index.html` без слеша → `301` на адрес со слешем; файл без расширения (`CNAME`, `.nojekyll`) → `200` с `Content-Type: application/octet-stream`; несуществующий путь → `404` с содержимым `404.html`. Измерения на своём пробном репозитории 2026-10-13 их подтвердили.
+
+## 5. Что эти свидетельства не доказывают
+
+- Причину `403` при создании репозитория installation-токеном.
+- Что GitHub App **user access token** создаёт репозиторий: измерен только user OAuth-токен `gh`.
+- Поведение адреса второго материала дня (`YYMMDD-2.html` → `/YYMMDD-2`) — ожидается тем же механизмом, но не измерялось; проверка относится к Stage 03.
+- Поведение при выборочном доступе к репозиториям, отзыве прав и потере установки.
